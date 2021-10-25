@@ -4,17 +4,21 @@
 
 #include "sph_system.h"
 
+#include <cmath>
+
 SPHSystem::SPHSystem() {
     m_unitScale			= 0.004f;			// 尺寸单位
     m_viscosity			= 1.0f;				// 粘度
     m_restDensity		= 1000.f;			// 密度
-    m_pointMass			= 0.0004f;			// 粒子质量
+    m_particleMass		= 0.0004f;			// 粒子质量
     m_gasConstantK		= 1.0f;				// 理想气体方程常量
     m_smoothRadius		= 0.01f;			// 光滑核半径
 
-    m_boundartStiffness = 10000.f;
+    m_boundaryStiffness = 10000.f;
     m_boundaryDampening = 256.f;
     m_speedLimiting		= 200.f;
+    m_deltaTime         = 0.003f;
+    m_timeIntegrator    = new SemiImplicitEuler(m_deltaTime);
 
     //Poly6 Kernel
     m_kernelPoly6 = 315.0f/(64.0f * 3.141592f * pow(m_smoothRadius, 9));
@@ -24,42 +28,53 @@ SPHSystem::SPHSystem() {
     m_kernelViscosity = 45.0f/(3.141592f * pow(m_smoothRadius, 6));
 }
 
-SPHSystem::~SPHSystem() {
-
+SPHSystem::~SPHSystem()
+{
+    free(m_timeIntegrator);
 }
 
-void SPHSystem::tick() {
-    m_gridContainer.insertParticles(&m_pointBuffer);
-    _computePressure();
+void SPHSystem::tick()
+{
+    //distribute all particles to grids in gridContainer for Neighborhood Particles Search
+    m_gridContainer.insertParticles(&m_particleBuffer);
+
+
+    _computeDensity();
     _computeForce();
     _advance();
 }
 
-void SPHSystem::_init(unsigned short maxPointCounts, const ParticleBox3 &wallBox, const ParticleBox3 &initFluidBox,
-                      const glm::vec3 &gravity) {
-    m_pointBuffer.reset(maxPointCounts);
+void SPHSystem::_init(unsigned short maxPointCounts,
+                      const ParticleBox3 &wallBox,
+                      const ParticleBox3 &initFluidBox,
+                      const glm::vec3 &gravity){
+    
+    //allocate memory for particle buffer
+    m_particleBuffer.reset(maxPointCounts);
 
     m_sphWallBox = wallBox;
     m_gravityDir = gravity;
 
-    // Create the particles
-    float pointDistance	= pow(m_pointMass/m_restDensity, 1.f/3.f); //粒子间距
-    _addFluidVolume(initFluidBox, pointDistance/m_unitScale);
+    // Create particles
+    float pointDistance	= std::pow(m_particleMass/m_restDensity, 1.0f/3.0f); //粒子间距
+    addParticles(initFluidBox, pointDistance/m_unitScale);
 
     // Setup grid Grid cell size (2r)
-    m_gridContainer.init(wallBox, m_unitScale, m_smoothRadius*2.f, 1.0);
+    m_gridContainer.init(wallBox, m_unitScale, m_smoothRadius * 2.f, 1.0);
 }
 
-void SPHSystem::_computePressure() {
+
+void SPHSystem::_computeDensity()
+{
     //h^2
     float h2 = m_smoothRadius*m_smoothRadius;
 
-    //reset neightbor table
-    m_neighborTable.reset(m_pointBuffer.size());
+    //reset neighbor table
+    m_neighborTable.reset(m_particleBuffer.size());
 
-    for(unsigned int i=0; i<m_pointBuffer.size(); i++)
+    for(unsigned int i=0; i<m_particleBuffer.size(); i++)
     {
-        Particle* pi = m_pointBuffer.get(i);
+        Particle* pi = m_particleBuffer.get(i);
 
         float sum = 0.f;
         m_neighborTable.point_prepare(i);
@@ -72,51 +87,63 @@ void SPHSystem::_computePressure() {
             if(gridCell[cell] == -1) continue;
 
             int pndx = m_gridContainer.getGridData(gridCell[cell]);
+
+            bool isNeighborTableFull = false;
+
             while(pndx != -1)
             {
-                Particle* pj = m_pointBuffer.get(pndx);
+                Particle* pj = m_particleBuffer.get(pndx);
                 if(pj == pi)
                 {
-                    sum += pow(h2, 3.f);  //self
+                    sum += std::pow(h2, 3.f);  //self
                 }
                 else
                 {
-                    glm::vec3 pi_pj = (pi->pos - pj->pos)*m_unitScale;
+                    glm::vec3 pi_pj = (pi->pos - pj->pos) * m_unitScale;
                     float pi_pj_len = glm::length(pi_pj);
                     float r2 = pi_pj_len * pi_pj_len;
                     if (h2 > r2)
                     {
                         float h2_r2 =  h2 - r2;
-                        sum += pow(h2_r2, 3.f);  //(h^2-r^2)^3
+                        sum += std::pow(h2_r2, 3.f);  //(h^2-r^2)^3
 
-                        if(!m_neighborTable.point_add_neighbor(pndx, sqrt(r2)))
+                        if(!m_neighborTable.point_add_neighbor(pndx, std::sqrt(r2)))
                         {
-                            goto NEIGHBOR_FULL;
+                            isNeighborTableFull = true;
+                            break;
                         }
                     }
                 }
                 pndx = pj->next;
             }
 
+            if (isNeighborTableFull)
+            {
+                break;
+            }
+
         }
 
-        NEIGHBOR_FULL:
         m_neighborTable.point_commit();
 
         //m_kernelPoly6 = 315.0f/(64.0f * 3.141592f * h^9);
-        pi->density = m_kernelPoly6*m_pointMass*sum;
-        pi->pressure = (pi->density - m_restDensity)*m_gasConstantK;
+        pi->density = m_kernelPoly6 * m_particleMass * sum;
+
+        //Calculate the pressure of single particle with the Ideal Gas State Equation
+        pi->pressure = (pi->density - m_restDensity) * m_gasConstantK;
     }
 }
 
-void SPHSystem::_computeForce() {
-    float h2 = m_smoothRadius*m_smoothRadius;
+void SPHSystem::_computeForce()
+{
+    float h2 = m_smoothRadius * m_smoothRadius;
 
-    for(unsigned int i=0; i<m_pointBuffer.size(); i++)
+    for(unsigned int i=0; i<m_particleBuffer.size(); i++)
     {
-        Particle* pi = m_pointBuffer.get(i);
+        Particle* pi = m_particleBuffer.get(i);
 
         glm::vec3 accel_sum(0,0,0);
+
         int neighborCounts = m_neighborTable.getNeighborCounts(i);
 
         for(int j=0; j <neighborCounts; j++)
@@ -125,7 +152,8 @@ void SPHSystem::_computeForce() {
             float r;
             m_neighborTable.getNeighborInfo(i, j, neighborIndex, r);
 
-            Particle* pj = m_pointBuffer.get(neighborIndex);
+            Particle* pj = m_particleBuffer.get(neighborIndex);
+
             //r(i)-r(j)
             glm::vec3 ri_rj = (pi->pos - pj->pos)*m_unitScale;
             //h-r
@@ -135,13 +163,13 @@ void SPHSystem::_computeForce() {
 
             //F_Pressure
             //m_kernelSpiky = -45.0f/(3.141592f * h^6);
-            float pterm = -m_pointMass*m_kernelSpiky*h_r*h_r*(pi->pressure+pj->pressure)/(2.f * pi->density * pj->density);
+            float pterm = -m_particleMass*m_kernelSpiky*h_r*h_r*(pi->pressure+pj->pressure)/(2.f * pi->density * pj->density);
             accel_sum += ri_rj*pterm/r;
 
             //F_Viscosity
             //m_kernelViscosity = 45.0f/(3.141592f * h^6);
-            float vterm = m_kernelViscosity * m_viscosity * h_r * m_pointMass/(pi->density * pj->density);
-            accel_sum += (pj->velocity_eval - pi->velocity_eval)*vterm;
+            float vterm = m_kernelViscosity * m_viscosity * h_r * m_particleMass/(pi->density * pj->density);
+            accel_sum += (pj->velocity - pi->velocity)*vterm;
         }
 
         pi->acceleration = accel_sum;
@@ -149,14 +177,13 @@ void SPHSystem::_computeForce() {
 }
 
 void SPHSystem::_advance() {
-    //fixed delta time per frame
-    float deltaTime = 0.003f;
+
 
     float SL2 = m_speedLimiting*m_speedLimiting;
 
-    for(unsigned int i=0; i<m_pointBuffer.size(); i++)
+    for(unsigned int i=0; i<m_particleBuffer.size(); i++)
     {
-        Particle* p = m_pointBuffer.get(i);
+        Particle* p = m_particleBuffer.get(i);
 
         // Compute Acceleration
         glm::vec3 accel = p->acceleration;
@@ -173,11 +200,11 @@ void SPHSystem::_advance() {
         // Boundary Conditions
 
         // Z-axis walls
-        float diff = 2 * m_unitScale - (p->pos.z - m_sphWallBox.min.z)*m_unitScale;
+        float diff = 2 * m_unitScale - (p->pos.z - m_sphWallBox.min.z) * m_unitScale;
         if (diff > 0.f )
         {
             glm::vec3 norm(0, 0, 1);
-            float adj = m_boundartStiffness * diff - m_boundaryDampening * glm::dot( norm, p->velocity_eval );
+            float adj = m_boundaryStiffness * diff - m_boundaryDampening * glm::dot( norm, p->velocity );
             accel.x += adj * norm.x;
             accel.y += adj * norm.y;
             accel.z += adj * norm.z;
@@ -187,7 +214,7 @@ void SPHSystem::_advance() {
         if (diff > 0.f)
         {
             glm::vec3 norm( 0, 0, -1);
-            float adj = m_boundartStiffness * diff - m_boundaryDampening * glm::dot( norm, p->velocity_eval );
+            float adj = m_boundaryStiffness * diff - m_boundaryDampening * glm::dot( norm, p->velocity );
             accel.x += adj * norm.x;
             accel.y += adj * norm.y;
             accel.z += adj * norm.z;
@@ -198,7 +225,7 @@ void SPHSystem::_advance() {
         if (diff > 0.f )
         {
             glm::vec3 norm(1, 0, 0);
-            float adj = m_boundartStiffness * diff - m_boundaryDampening * glm::dot( norm, p->velocity_eval ) ;
+            float adj = m_boundaryStiffness * diff - m_boundaryDampening * glm::dot( norm, p->velocity ) ;
             accel.x += adj * norm.x;
             accel.y += adj * norm.y;
             accel.z += adj * norm.z;
@@ -208,7 +235,7 @@ void SPHSystem::_advance() {
         if (diff > 0.f)
         {
             glm::vec3 norm(-1, 0, 0);
-            float adj = m_boundartStiffness * diff - m_boundaryDampening * glm::dot( norm, p->velocity_eval );
+            float adj = m_boundaryStiffness * diff - m_boundaryDampening * glm::dot( norm, p->velocity );
             accel.x += adj * norm.x;
             accel.y += adj * norm.y;
             accel.z += adj * norm.z;
@@ -219,7 +246,7 @@ void SPHSystem::_advance() {
         if (diff > 0.f)
         {
             glm::vec3 norm(0, 1, 0);
-            float adj = m_boundartStiffness * diff - m_boundaryDampening * glm::dot( norm, p->velocity_eval );
+            float adj = m_boundaryStiffness * diff - m_boundaryDampening * glm::dot( norm, p->velocity );
             accel.x += adj * norm.x;
             accel.y += adj * norm.y;
             accel.z += adj * norm.z;
@@ -228,7 +255,7 @@ void SPHSystem::_advance() {
         if (diff > 0.f)
         {
             glm::vec3 norm(0, -1, 0);
-            float adj = m_boundartStiffness * diff - m_boundaryDampening * glm::dot( norm, p->velocity_eval );
+            float adj = m_boundaryStiffness * diff - m_boundaryDampening * glm::dot( norm, p->velocity );
             accel.x += adj * norm.x;
             accel.y += adj * norm.y;
             accel.z += adj * norm.z;
@@ -237,28 +264,23 @@ void SPHSystem::_advance() {
         // Plane gravity
         accel += m_gravityDir;
 
-        // Leapfrog Integration ----------------------------
-        glm::vec3 vnext = p->velocity + accel*deltaTime;			// v(t+1/2) = v(t-1/2) + a(t) dt
-        p->velocity_eval = (p->velocity + vnext)*0.5f;				// v(t+1) = [v(t-1/2) + v(t+1/2)] * 0.5		used to compute forces later
-        p->velocity = vnext;
-        p->pos += vnext*deltaTime/m_unitScale;		// p(t+1) = p(t) + v(t+1/2) dt
+        p->acceleration = accel;
+
+        m_timeIntegrator->update(p);
+
+
     }
 }
 
-
-
-void SPHSystem::_addFluidVolume(const ParticleBox3 &fluidBox, float spacing) {
-    float cx = (fluidBox.max.x+fluidBox.min.x)/2.f;
-    float cy = (fluidBox.max.y+fluidBox.min.y)/2.f;
-    float cz = (fluidBox.max.z+fluidBox.min.z)/2.f;
-
-    for(float z=fluidBox.max.z; z>=fluidBox.min.z; z-=spacing)
+void SPHSystem::addParticles(const ParticleBox3 &fluidBox, float spacing)
+{
+    for (float z=fluidBox.max.z; z>=fluidBox.min.z; z-=spacing)
     {
-        for(float y=fluidBox.min.y; y<=fluidBox.max.y; y+=spacing)
+        for (float y=fluidBox.min.y; y<=fluidBox.max.y; y+=spacing)
         {
-            for(float x=fluidBox.min.x; x<=fluidBox.max.x; x+=spacing)
+            for (float x=fluidBox.min.x; x<=fluidBox.max.x; x+=spacing)
             {
-                Particle* p = m_pointBuffer.AddParticle();
+                Particle* p = m_particleBuffer.AddParticle();
 
                 p->pos.x = x;
                 p->pos.y = y;
@@ -267,4 +289,3 @@ void SPHSystem::_addFluidVolume(const ParticleBox3 &fluidBox, float spacing) {
         }
     }
 }
-

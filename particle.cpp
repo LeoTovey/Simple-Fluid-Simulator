@@ -60,7 +60,6 @@ Particle *ParticleBuffer::AddParticle()
     particle->pos = glm::vec3(0, 0, 0);
     particle->next = 0;
     particle->velocity = glm::vec3(0,0,0);
-    particle->velocity_eval = glm::vec3(0,0,0);
     particle->pressure = 0;
     particle->density = 0;
     particle->acceleration = glm::vec3(0,0,0);

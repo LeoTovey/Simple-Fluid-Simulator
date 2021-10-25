@@ -21,7 +21,7 @@ include_directories(
 
 set(ALL_LIBS ${OPENGL_LIBRARY} glm glfw imgui glad stb_image assimp)
 
-add_executable(Simple_Fluid_Simulator main.cpp particle_box.h particle_box.cpp particle.h particle.cpp sph_system.cpp sph_system.h rendering/mesh.h rendering/model.h rendering/shader.h rendering/camera.h)
+add_executable(Simple_Fluid_Simulator main.cpp particle_box.h particle_box.cpp particle.h particle.cpp sph_system.cpp sph_system.h rendering/mesh.h rendering/model.h rendering/shader.h rendering/camera.h time_integrator.cpp time_integrator.h)
 target_include_directories(Simple_Fluid_Simulator PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 target_link_libraries(${PROJECT_NAME} ${ALL_LIBS})
 

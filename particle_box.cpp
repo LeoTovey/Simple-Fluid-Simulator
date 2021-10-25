@@ -10,20 +10,26 @@ ParticleGridContainer::ParticleGridContainer() = default;
 
 ParticleGridContainer::~ParticleGridContainer() = default;
 
-int ParticleGridContainer::getGridData(int gridIndex) {
-    if(gridIndex<0 || gridIndex>=(int)m_gridData.size()) return -1;
+int ParticleGridContainer::getGridData(int gridIndex)
+{
+    if (gridIndex<0 || gridIndex>=(int)m_gridData.size())
+    {
+        return -1;
+    }
 
     return m_gridData[gridIndex];
 }
 
-int ParticleGridContainer::getGridCellIndex(float px, float py, float pz) const {
+int ParticleGridContainer::getGridCellIndex(float px, float py, float pz) const
+{
     int gx = (int)((px - m_gridMin.x) * m_gridDelta.x);
     int gy = (int)((py - m_gridMin.y) * m_gridDelta.y);
     int gz = (int)((pz - m_gridMin.z) * m_gridDelta.z);
     return (gz * m_gridRes.y + gy) * m_gridRes.x + gx;
 }
 
-void ParticleGridContainer::init(const ParticleBox3 &box, float sim_scale, float cell_size, float border) {
+void ParticleGridContainer::init(const ParticleBox3 &box, float sim_scale, float cell_size, float border)
+{
     // Ideal grid cell size (gs) = 2 * smoothing radius = 0.02*2 = 0.04
     // Ideal domain size = k*gs/d = k*0.02*2/0.005 = k*8 = {8, 16, 24, 32, 40, 48, ..}
     //    (k = number of cells, gs = cell size, d = simulation scale)
@@ -31,17 +37,21 @@ void ParticleGridContainer::init(const ParticleBox3 &box, float sim_scale, float
 
     m_gridMin = box.min;	m_gridMin -= border;
     m_gridMax = box.max;	m_gridMax += border;
+
     m_gridSize = m_gridMax;
     m_gridSize -= m_gridMin;
     m_gridCellSize = world_cellsize;
+
     // Determine grid resolution
     m_gridRes.x = (int)ceil(m_gridSize.x / world_cellsize);
     m_gridRes.y = (int)ceil(m_gridSize.y / world_cellsize);
     m_gridRes.z = (int)ceil(m_gridSize.z / world_cellsize);
+
     // Adjust grid size to multiple of cell size
     m_gridSize.x = m_gridRes.x * cell_size / sim_scale;
     m_gridSize.y = m_gridRes.y * cell_size / sim_scale;
     m_gridSize.z = m_gridRes.z * cell_size / sim_scale;
+
     // delta = translate from world space to cell #
     m_gridDelta = m_gridRes;
     m_gridDelta /= m_gridSize;
@@ -50,7 +60,8 @@ void ParticleGridContainer::init(const ParticleBox3 &box, float sim_scale, float
     m_gridData.resize(gridTotal);
 }
 
-void ParticleGridContainer::insertParticles(ParticleBuffer *particleBuffer) {
+void ParticleGridContainer::insertParticles(ParticleBuffer *particleBuffer)
+{
     std::fill(m_gridData.begin(), m_gridData.end(), -1);
 
     Particle* p = particleBuffer->get(0);
@@ -66,33 +77,38 @@ void ParticleGridContainer::insertParticles(ParticleBuffer *particleBuffer) {
     }
 }
 
-void ParticleGridContainer::findCells(const glm::vec3 &p, float radius, int *gridCell) const {
+void ParticleGridContainer::findCells(const glm::vec3 &p, float radius, int *gridCell) const
+{
     for(int i=0; i<8; i++) gridCell[i]=-1;
 
     // Compute sphere range
     int sph_min_x = (int)((-radius + p.x - m_gridMin.x) * m_gridDelta.x);
     int sph_min_y = (int)((-radius + p.y - m_gridMin.y) * m_gridDelta.y);
     int sph_min_z = (int)((-radius + p.z - m_gridMin.z) * m_gridDelta.z);
+
     if ( sph_min_x < 0 ) sph_min_x = 0;
     if ( sph_min_y < 0 ) sph_min_y = 0;
     if ( sph_min_z < 0 ) sph_min_z = 0;
 
-    gridCell[0] = (sph_min_z*m_gridRes.y + sph_min_y)*m_gridRes.x + sph_min_x;
+    gridCell[0] = (sph_min_z * m_gridRes.y + sph_min_y) * m_gridRes.x + sph_min_x;
     gridCell[1] = gridCell[0] + 1;
     gridCell[2] = (int)(gridCell[0] + m_gridRes.x);
     gridCell[3] = gridCell[2] + 1;
 
-    if ( sph_min_z+1 < m_gridRes.z ) {
-        gridCell[4] = (int)(gridCell[0] + m_gridRes.y*m_gridRes.x);
+    if ( sph_min_z+1 < m_gridRes.z )
+    {
+        gridCell[4] = (int)(gridCell[0] + m_gridRes.y * m_gridRes.x);
         gridCell[5] = gridCell[4] + 1;
         gridCell[6] = (int)(gridCell[4] + m_gridRes.x);
         gridCell[7] = gridCell[6] + 1;
     }
-    if ( sph_min_x+1 >= m_gridRes.x ) {
+    if ( sph_min_x+1 >= m_gridRes.x )
+    {
         gridCell[1] = -1;		gridCell[3] = -1;
         gridCell[5] = -1;		gridCell[7] = -1;
     }
-    if ( sph_min_y+1 >= m_gridRes.y ) {
+    if ( sph_min_y+1 >= m_gridRes.y )
+    {
         gridCell[2] = -1;		gridCell[3] = -1;
         gridCell[6] = -1;		gridCell[7] = -1;
     }
@@ -102,7 +118,7 @@ void ParticleGridContainer::findCells(const glm::vec3 &p, float radius, int *gri
 NeighborTable::NeighborTable()
         : m_pointExtraData(0)
         , m_pointCounts(0)
-        , m_pointCapcity(0)
+        , m_pointCapacity(0)
         , m_neighborDataBuf(0)
         , m_dataBufSize(0)
         , m_currNeighborCounts(0)
@@ -122,18 +138,18 @@ NeighborTable::~NeighborTable()
 void NeighborTable::reset(unsigned short pointCounts)
 {
     int a = sizeof(PointExtraData);
-    if(pointCounts>m_pointCapcity)
+    if(pointCounts>m_pointCapacity)
     {
         if(m_pointExtraData)
         {
             free(m_pointExtraData);
         }
         m_pointExtraData = (PointExtraData*)malloc(sizeof(PointExtraData)*pointCounts);
-        m_pointCapcity = pointCounts;
+        m_pointCapacity = pointCounts;
     }
 
     m_pointCounts = pointCounts;
-    memset(m_pointExtraData, 0, sizeof(PointExtraData)*m_pointCapcity);
+    memset(m_pointExtraData, 0, sizeof(PointExtraData)*m_pointCapacity);
     m_dataBufOffset = 0;
 }
 
@@ -147,9 +163,9 @@ void NeighborTable::point_prepare(unsigned short ptIndex)
 //-----------------------------------------------------------------------------------------------------------------
 bool NeighborTable::point_add_neighbor(unsigned short ptIndex, float distance)
 {
-    if(m_currNeighborCounts>=MAX_NEIGHTBOR_COUNTS) return false;
+    if (m_currNeighborCounts >= MAX_NEIGHBOR_COUNTS) return false;
 
-    m_currNeightborIndex[m_currNeighborCounts]=ptIndex;
+    m_currNeighborIndex[m_currNeighborCounts]=ptIndex;
     m_currNeighborDistance[m_currNeighborCounts]=distance;
 
     m_currNeighborCounts++;
@@ -175,7 +191,7 @@ void NeighborTable::point_commit(void)
     m_pointExtraData[m_currPoint].neighborDataOffset = m_dataBufOffset;
 
     //copy index data
-    memcpy(m_neighborDataBuf+m_dataBufOffset, m_currNeightborIndex, index_size);
+    memcpy(m_neighborDataBuf+m_dataBufOffset, m_currNeighborIndex, index_size);
     m_dataBufOffset += index_size;
 
     //copy distance data

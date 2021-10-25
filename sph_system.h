@@ -6,6 +6,7 @@
 #define SIMPLE_FLUID_SIMULATOR_SPH_SYSTEM_H
 
 #include "particle_box.h"
+#include "time_integrator.h"
 
 class SPHSystem{
 
@@ -23,22 +24,23 @@ public:
     }
 
     unsigned int getPointStride() const { return sizeof(Particle); }
-    unsigned int getPointCounts() const { return m_pointBuffer.size(); }
-    const glm::vec3* getPointBuf() const { return (const glm::vec3*)m_pointBuffer.get(0); }
+    unsigned int getPointCounts() const { return m_particleBuffer.size(); }
+    const glm::vec3* getPointBuf() const { return (const glm::vec3*)m_particleBuffer.get(0); }
     virtual void tick();
 
 private:
 
     void _init(unsigned short maxPointCounts, const ParticleBox3& wallBox, const ParticleBox3& initFluidBox, const glm::vec3 & gravity);
-    void _computePressure();
+    void _computeDensity();
     void _computeForce();
     void _advance();
-    void _addFluidVolume(const ParticleBox3& fluidBox, float spacing);
+    void addParticles(const ParticleBox3& fluidBox, float spacing);
 
 private:
-    ParticleBuffer m_pointBuffer;
+    ParticleBuffer m_particleBuffer;
     ParticleGridContainer m_gridContainer;
     NeighborTable m_neighborTable;
+    TimeIntegrator* m_timeIntegrator;
 
     // SPH Kernel
     float m_kernelPoly6;
@@ -49,12 +51,13 @@ private:
     float m_unitScale;
     float m_viscosity;
     float m_restDensity;
-    float m_pointMass;
+    float m_particleMass;
     float m_smoothRadius;
     float m_gasConstantK;
-    float m_boundartStiffness;
+    float m_boundaryStiffness;
     float m_boundaryDampening;
     float m_speedLimiting;
+    float m_deltaTime;
     glm::vec3 m_gravityDir;
 
     ParticleBox3 m_sphWallBox;

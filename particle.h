@@ -15,10 +15,7 @@ public:
     float			density;
     float			pressure;
     glm::vec3 		acceleration;
-
     glm::vec3 		velocity;
-    glm::vec3 		velocity_eval;
-
     int				next;
 };
 

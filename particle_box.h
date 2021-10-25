@@ -63,11 +63,11 @@ public:
     void point_commit(void);
     /** get point neighbor counts */
     int getNeighborCounts(unsigned short ptIndex) { return m_pointExtraData[ptIndex].neighborCounts; }
-    /** get point neightbor information*/
+    /** get point neighbor information*/
     void getNeighborInfo(unsigned short ptIndex, int index, unsigned short& neighborIndex, float& neighborDistance);
 
 private:
-    enum {MAX_NEIGHTBOR_COUNTS=80,};
+    enum {MAX_NEIGHBOR_COUNTS=80,};
 
     union PointExtraData
     {
@@ -82,7 +82,7 @@ private:
 
     PointExtraData* m_pointExtraData;
     unsigned int m_pointCounts;
-    unsigned int m_pointCapcity;
+    unsigned int m_pointCapacity;
 
     unsigned char* m_neighborDataBuf;	//neighbor data buf
     unsigned int m_dataBufSize;			//in bytes
@@ -91,8 +91,8 @@ private:
     ////// temp data for current point
     unsigned short m_currPoint;
     int m_currNeighborCounts;
-    unsigned short m_currNeightborIndex[MAX_NEIGHTBOR_COUNTS];
-    float m_currNeighborDistance[MAX_NEIGHTBOR_COUNTS];
+    unsigned short m_currNeighborIndex[MAX_NEIGHBOR_COUNTS];
+    float m_currNeighborDistance[MAX_NEIGHBOR_COUNTS];
 
 private:
     void _growDataBuf(unsigned int need_size);
